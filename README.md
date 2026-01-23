@@ -2,7 +2,7 @@
 This is the repository for the final project assignment from the Data Handling and Illustrations course taken in Jan. 19-30, 2026.
 
 ## Objectives
-The objectives of this assignment are to demonstrate the skills and knowledge the students have learned from the one week course in SLU Ultuna Jan. 19-23.
+The objectives of this assignment are to demonstrate the skills and knowledge the students have learned from the one week course in SLU Ultuna during Jan. 19-23.
 
 ## Contents
 * Construct three geoms using ggplot using distinct data manipulation technics and data types
