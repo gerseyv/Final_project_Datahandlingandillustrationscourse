@@ -18,6 +18,9 @@ The map was made using the software QGIS.
 Graphs were made using the software R.
 
 ## Data availability
+Trait data is readily available for request from try-db.org and in the Appendix A - Supplementary data 1 of Tylor et al. (2021) (DOI: https://doi.org/10.1016/j.ecolind.2020.106923).
+
+Data from my PhD will not be made publicly availability until submission for publication.
 
 ## Set up
 
