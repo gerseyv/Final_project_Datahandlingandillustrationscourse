@@ -1,0 +1,480 @@
+---
+title: "Final_assignment_datahandlingcourse"
+author: "Gersey Vargas"
+date: "01/29/2026"
+email: gersey.vargas.rivera@slu.se
+fig-width: 8
+fig-height: 4
+format: html
+editor: visual
+theme: "pulse"
+---
+
+## 1. Data set Overview
+
+-   Data source and context:
+
+The data is orginally from my 2025 fieldwork in Jämtland where I did 1x1m vegetation plots to compare the botanical composition between horse grazed fields and abandoned fields. I have plot data including species name and abundance (coverage ranked in a 1-10 scale).
+
+I combined this data with available trait data related to pollination so I can compare the pollination potential of the plant communities of each field type.
+
+I used two sources to get the trait data. I extracted trait data on Plant reproductive phenology timing (flowering time) and Pollination syndrome from try-db.org (Kattge et al., 2020) and on Nectar production and Biodiversity relevance from the Appendix A - Supplementary data 1 of Tyler et al. (2021) (DOI: https://doi.org/10.1016/j.ecolind.2020.106923).
+
+I could calculate community weighted means using my composition data and the trait data so I can compare the how much the plant communities of each field type are weighing in each trait. The community weighted means were calculated using functcomp() from the FD package (Laliberté and Legendre, 2010) in R.
+
+------------------------------------------------------------------------
+
+References:
+
+Kattge, J., Bönisch, G., Díaz, S., Lavorel, S., Prentice, I. C., Leadley, P., ... & Cuntz, M. (2020). TRY plant trait database–enhanced coverage and open access. Global change biology, 26(1), 119-188.
+
+Laliberté, E., and P. Legendre (2010) A distance-based framework for measuring functional diversity from multiple traits. Ecology 91:299-305.
+
+Tyler, T., Herbertsson, L., Olofsson, J., & Olsson, P. A. (2021). Ecological indicator and traits values for Swedish vascular plants. Ecological Indicators, 120, 106923.
+
+------------------------------------------------------------------------
+
+-   Key variables:
+
+    -   Pollinating insect orders
+
+    -   Flowering syndromes
+
+    -   Flowering months
+
+    -   Nectar production
+
+    -   Biodiversity relevance
+
+-   What you think of the data quality:
+
+I think the quality of the TRY database data is sometimes questionable. It uses global averages and pulls data from multiple sources so sometimes the measurements for a certain trait are not fully standarized. I believe the data I collected is of good quality, however I am not a plant specialist so some mistakes could have been made.
+
+This is the map I made using QGIS and the Natural Earth layers we were provided in the course:
+
+![Map of field sites. Left) Västerbotten sites and right) Jämtland sites.](my_map.png)
+
+## 2. Data Handling Section
+
+-   Document and justify each major transformation
+-   Include all code with comments
+-   Explain how transformations support your visualization goals
+
+First step: Load package and wd
+
+```{r}
+library(knitr)
+knitr::opts_knit$set(root.dir = "C:/GerseyNotSLU/Plantdataanalysis/TRY_data/")
+library(dplyr) #summarise, group_by, filter
+library(ggplot2) #ggplot
+library(tidyverse) #pivot_longer
+library(forcats) #fct_reorder
+library(patchwork)
+
+```
+
+Load data.
+
+```{r}
+#| echo: true
+cwm2 <- read.csv2("cwm_ga_data.csv")
+rownames(cwm2) <- cwm2$X
+cwm2 <- cwm2[,-1]
+#str(cwm2)
+#head(cwm2,1) 
+#colnames(cwm2)
+
+```
+
+I was able to improve my coding substantially using the knowledge I learned during this course. Here is an example of how I improved my coding:
+
+```{r}
+#| eval: false
+#| include: true
+####Pollinator diversity####
+# Convert from wide to long format
+
+df_long <- cwm2 %>%
+  pivot_longer(
+    cols = starts_with("Pollinators_"),   # columns to reshape
+    names_to = "variable",       # new column for variable names
+    values_to = "value"          # new column for values
+  )
+
+#Code I was using before
+#I made a function (reinvented the wheel...) to get averages and sds from my data to make bargraphs 
+ave.n.sd <- function(x){
+  grazed1 <- filter(x, Field %in% c("Grazed"))
+  ungrazed1 <- filter(x, Field %in% c("Ungrazed"))
+  
+  grazed.pol.ave <- data.frame(t(aggregate(value ~ variable, data = grazed1, mean)))
+  ungrazed.pol.ave <- data.frame(t(aggregate(value ~ variable, data = ungrazed1, mean)))
+  grazed.pol.sd <- data.frame(t(aggregate(value ~ variable, data = grazed1, sd)))
+  ungrazed.pol.sd <- data.frame(t(aggregate(value ~ variable, data = ungrazed1, sd)))
+  
+  
+  fields <- c("Grazed","Ungrazed","Grazed_SD","Ungrazed_SD")
+  poldiv.table <- rbind(grazed.pol.ave, ungrazed.pol.ave[2,], grazed.pol.sd[2,], ungrazed.pol.sd[2,])
+  poldiv.table[] <- lapply(poldiv.table[], as.numeric)
+  poldiv.table <- poldiv.table[complete.cases(poldiv.table), ]
+  poldiv.table <- data.frame(poldiv.table)
+  rownames(poldiv.table) <- fields
+  colnames(poldiv.table) <- grazed.pol.ave[1,]
+  return(poldiv.table)
+}
+
+pol.dive.table <- ave.n.sd(df_long)
+
+#New code from course, does the same thing
+pol.dive.table2 <- df_long %>% 
+  group_by(Field, variable) %>% 
+  summarise(mean_value = mean(value), sd_value = sd(value))
+
+```
+
+The first variable I will work with is about the pollinator insect orders that are known to visit the plants of each field type. Here I compare overall plants that are insect pollinated, hymenoptera, lepidoptera, diptera, coleoptera, and plants that can reproduce independently through selfing.
+
+I made bargraphs, boxplots and violin graphs to compare how to best visualize the results. I selected the colors manually from a color-blind friendly palette. I wanted to try to make the interpretation a little more intuitive by making grazed a green lively color, while abandoned has more of a dry vegetation color, which is how the vegetation looks when its overshadowed by the overgrowth for some time.
+
+```{r}
+#| echo: true
+####Insect groups####
+#Trying with insect orders
+#collect all the order data in the columns Field, variable and value
+#The transformation with pivot_longer is necessary because my data was in wide format and it needs to be in long format so I can make the graphs I want.
+orders <- cwm2 %>% 
+  pivot_longer(
+    cols = c(Pollinated_1, Hymenoptera_1,Lepidoptera_1, Diptera_1, Coleoptera_1, Selfing_1),   # columns to reshape
+    names_to = "variable",       # new column for variable names
+    values_to = "value")           # new column for values)
+
+#I had to rearrange the graphs using fct_reorder() because the default is alphabetical order and I wanted it in a specific order.
+
+#bargraph raw data
+o <- orders %>% ggplot(aes(x=forcats::fct_reorder(variable, desc(value), .fun = mean), y=value, fill = Field)) +
+  geom_bar(stat="identity", position = "dodge")+
+  #geom_errorbar(aes(ymin = mean(value) - sd(value), ymax = mean(value) + sd(value)), width = 0.2, linewidth = 0.8) +  # SD error bars
+  scale_fill_manual(values=c("#117733", "#DDCC77")) +
+  labs(x = "Pollinator orders", y = "Relative dominance of trait in the community per plot", title = "Pollinator orders averages") +
+  ylim(0,1.1) +
+  theme_test()
+
+#I did some summarizing to calculate means and sds because the bargraph looked strange.
+orders.stats <- orders %>% 
+  group_by(Field,variable) %>% 
+  summarise(mean_value =mean(value), sd_value = sd(value))
+
+#bargraph with summary, I could not get the SD to show well on the graph
+os <- orders.stats %>% ggplot(aes(x=forcats::fct_reorder(variable, desc(mean_value), .fun = mean), y=mean_value, fill = Field)) +
+  geom_bar(stat="identity", position = "dodge")+
+  #geom_errorbar(aes(ymin = mean_value - sd_value, ymax = mean_value + sd_value), width = 0.2, linewidth = 0.8) +  # SD error bars
+  scale_fill_manual(values=c("#117733", "#DDCC77")) +
+  labs(x = "Pollinator orders", y = "Relative dominance of trait in the community per plot", title = "Pollinator orders averages") +
+  ylim(0,1.1) +
+  theme_test()
+
+#box plot
+ob <- ggplot(data.frame(orders), aes(x = forcats::fct_reorder(variable, desc(value), .fun = median), y = value, fill = Field)) +
+  geom_boxplot() +
+  scale_fill_manual(values=c("#117733", "#DDCC77")) +
+  labs(x = "Pollinator orders", y = "Relative dominance of trait in the community per plot", title = "Pollinator orders averages") +
+  ylim(0,1.1) +
+  theme_test()
+  
+
+# violin graph
+ov <- ggplot(orders, aes(x= forcats::fct_reorder(variable, desc(value), .fun = median), y=value, fill=Field)) + 
+  geom_violin(trim=FALSE) +
+  scale_fill_manual(values=c("#117733", "#DDCC77")) +
+  labs(x = "Pollinator diversity", y = "Relative dominance of trait in the community per plot", title = "Pollinators")+ 
+  theme_test()
+
+o+os+ob+ov +
+  plot_layout(guides = 'collect',axis_titles = 'collect_y')
+
+```
+
+Another example of how I improved my coding with my new knowledge. Before I did not understand that you could select all the columns you wanted in one data frame:
+
+```{r}
+#| eval: false
+#| include: true
+#Previous code
+hym <- cwm2 %>%
+  pivot_longer(
+    cols = Hymenoptera_1,   # columns to reshape
+    names_to = "variable",       # new column for variable names
+    values_to = "value"          # new column for values
+  )
+
+lep <- cwm2 %>%
+  pivot_longer(
+    cols = Lepidoptera_1,   # columns to reshape
+    names_to = "variable",       # new column for variable names
+    values_to = "value"          # new column for values
+  )
+dip <- cwm2 %>%
+  pivot_longer(
+    cols = Diptera_1,   # columns to reshape
+    names_to = "variable",       # new column for variable names
+    values_to = "value"          # new column for values
+  )
+self <- cwm2 %>%
+  pivot_longer(
+    cols = Selfing_1,   # columns to reshape
+    names_to = "variable",       # new column for variable names
+    values_to = "value"          # new column for values
+  )
+cole <- cwm2 %>%
+  pivot_longer(
+    cols = Coleoptera_1,   # columns to reshape
+    names_to = "variable",       # new column for variable names
+    values_to = "value"          # new column for values
+  )
+all_pol <- cwm2 %>%
+  pivot_longer(
+    cols = Pollinated_1,   # columns to reshape
+    names_to = "variable",       # new column for variable names
+    values_to = "value"          # new column for values
+  )
+
+all_pol.ave <- ave.n.sd(all_pol)
+hym.ave <- ave.n.sd(hym)
+lep.ave <- ave.n.sd(lep)
+dip.ave <- ave.n.sd(dip)
+col.ave <- ave.n.sd(cole)
+self.av <- ave.n.sd(self)
+
+pol_orders_cwmbar <- cbind(all_pol.ave,hym.ave, lep.ave, dip.ave, col.ave,self.av)
+
+pol_orders_cwmbox <- rbind(all_pol[,184:ncol(all_pol)],hym[,184:ncol(all_pol)], lep[,184:ncol(all_pol)], dip[,184:ncol(all_pol)], cole[,184:ncol(all_pol)], self[,184:ncol(all_pol)])
+
+order.names <- c("All", "Hymenoptera","Lepidoptera","Diptera","Coleoptera", "Selfing")
+orders.matrix <- as.matrix(pol_orders_cwmbar)
+
+ggplot(data.frame(pol_orders_cwmbox), aes(x = forcats::fct_reorder(variable, desc(value), .fun = median), y = value, fill = Field)) +
+  geom_boxplot() +
+  scale_fill_manual(values=c("#117733", "#DDCC77")) +
+  labs(x = "Pollinator orders", y = "Relative dominance of trait in the community per plot", title = "Pollinator orders averages") +
+  ylim(0,1.1) +
+  theme_test()
+```
+
+Next, I will look at the flowering syndromes. I want to compare the representation of insect and wind pollinated plants species in each field type. I gave up on using bar graphs so I just compared a box plot to a violin graph here.
+
+```{r}
+#| echo: true
+####Flowering syndromes####
+syndromes <- cwm2 %>%
+  pivot_longer(
+    cols = c(Insect_pol_1,Wind_pol_1,Both_pol_1),   # columns to reshape
+    names_to = "variable",       # new column for variable names
+    values_to = "value"          # new column for values
+  )
+
+sb <- ggplot(data.frame(syndromes), aes(x = forcats::fct_reorder(variable, desc(value), .fun = median), y = value, fill = Field)) +
+  geom_boxplot() +
+  scale_fill_manual(values=c("#117733", "#DDCC77")) +
+  labs(x = "Flower syndromes", y = "Relative dominance of trait in the community per plot", title = "Average flower syndromes") +
+  ylim(0,1.1) +
+  theme_test()
+
+sv <- ggplot(data.frame(syndromes), aes(x = forcats::fct_reorder(variable, desc(value), .fun = median), y = value, fill = Field)) +
+  geom_violin(trim=FALSE) +
+  scale_fill_manual(values=c("#117733", "#DDCC77")) +
+  labs(x = "Flower syndromes", y = "Relative dominance of trait in the community per plot", title = "Average flower syndromes") +
+  ylim(0,1.1) +
+  theme_test()
+
+sb / sv +
+  plot_layout(guides = 'collect', axis_titles = 'collect')
+
+
+```
+
+Next, I will look at the different months in which plants flowers to understand when each field type is important for supporting pollinator populations. Here I also compare a box plot to a violin graph.
+
+```{r}
+#| echo: true
+####Flowering Months####
+months <- cwm2 %>% 
+  pivot_longer(
+    cols = c(May_1,June_1,July_1,Aug_1,Sep_1,Oct_1),   # columns to reshape
+    names_to = "variable",       # new column for variable names
+    values_to = "value"          # new column for values
+  )
+
+mb <- ggplot(data.frame(months), aes(x = variable, y = value, fill = Field)) +
+  geom_boxplot() +
+  scale_fill_manual(values=c("#117733", "#DDCC77")) +
+  labs(x = "Months", y = "Relative dominance of trait in the community per plot", title = "Flowering Months") +
+  ylim(0,1.1) +
+  theme_test()
+
+mv <- ggplot(data.frame(months), aes(x = variable, y = value, fill = Field)) +
+  geom_violin(trim=FALSE) +
+  scale_fill_manual(values=c("#117733", "#DDCC77")) +
+  labs(x = "Months", y = "Relative dominance of trait in the community per plot", title = "Flowering Months") +
+  ylim(0,1.1) +
+  theme_test()
+
+mb/mv +
+  plot_layout(guides = 'collect',axis_titles = 'collect')
+
+
+```
+
+The violin graph for the previous variable did not look great so I decided to just use bar plots to visualize all the variable and maintain consistency.
+
+Now, I will look at nectar production to see if the field types are offering similar amount of food for the pollinator communities.
+
+This is a categorical variable defined by Tayler et al. (2021): 1 = no nectar production (0 g sugar/m2 /year) and no collectable pollen, 2 = nectar production insignificant (\< 0.2 g), or absent but with low but significant amounts of collectable pollen, 3 = nectar production small (0.2–5 g), or lower but with copious collectable pollen 4 = nectar production modest (5–20 g), 5 = rather large (20–50 g), 6 = large (50–200 g), 7 = very large (\> 200 g).
+
+```{r}
+#| echo: true
+####Nectar production####
+nectar <- cwm2 %>%
+  pivot_longer(
+    cols = starts_with("nectarprod"),,   # columns to reshape
+    names_to = "variable",       # new column for variable names
+    values_to = "value"          # new column for values
+  )
+
+#box plot
+nb <- ggplot(nectar, aes(x = variable, y = value, fill = Field)) +
+  geom_boxplot() +
+  scale_fill_manual(values=c("#117733", "#DDCC77")) +
+  labs(x = "Nectar production category", y = "Relative dominance of trait in the community per plot", title = "Nectar production") +
+  ylim(0,1.1) +
+  theme_test()
+
+```
+
+The last variable I look at was biodiversity relevance. This is also a categorical variable based on the scale proposed by Taylor et al. (2021): 1 = \< 6 associated species, 2 = 6–12, 3 = 13–24, 4 = 25–50, 5 = 51–100, 6 = 101–200, 7 = 201–400, 8 = \> 400.
+
+```{r}
+####Biodiversity relevance####
+bio.rev <- cwm2 %>%
+  pivot_longer(
+    cols = starts_with("bio_re"),   # columns to reshape
+    names_to = "variable",       # new column for variable names
+    values_to = "value"          # new column for values
+  )
+
+
+#box plot
+bb <- ggplot(bio.rev, aes(x = variable, y = value, fill = Field)) +
+  geom_boxplot() +
+  scale_fill_manual(values=c("#117733", "#DDCC77")) +
+  labs(x = "Category for number of species associations", y = "Relative dominance of trait in the community per plot", title = "Biodiversity relevance") +
+  ylim(0,1.1) +
+  theme_test()
+
+```
+
+To finish, I want to put all the graphs together to make a single figure using patchwork.
+
+```{r}
+#| echo: true
+#patch them together for a final image
+library(patchwork) # multiple plot alignment
+
+#Pollinator orders
+ob <- ggplot(data.frame(orders), aes(x = forcats::fct_reorder(variable, desc(value), .fun = median), y = value, fill = Field)) +
+  geom_boxplot() +
+  scale_fill_manual(values=c("#117733", "#DDCC77")) +
+  labs(x = "Pollinator orders", y = NULL, title = "Pollinator orders averages") +
+  ylim(0,1.1) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  theme_test()
+
+#Flower syndromes
+sb <- ggplot(data.frame(syndromes), aes(x = forcats::fct_reorder(variable, desc(value), .fun = median), y = value, fill = Field)) +
+  geom_boxplot(show.legend = FALSE) +
+  scale_fill_manual(values=c("#117733", "#DDCC77")) +
+  labs(x = "Flower syndromes", y = "Relative dominance of trait in the community per plot", title = "Average flower syndromes") +
+  ylim(0,1.1) +
+  theme_test()
+
+#Flowering months
+mb <- ggplot(data.frame(months), aes(x = variable, y = value, fill = Field)) +
+  geom_boxplot(show.legend = FALSE) +
+  scale_fill_manual(values=c("#117733", "#DDCC77")) +
+  labs(x = "Months", y = NULL, title = "Flowering Months") +
+  ylim(0,1.1) +
+  theme_test()
+
+#Nectar production
+nb <- ggplot(nectar, aes(x = variable, y = value, fill = Field)) +
+  geom_boxplot(show.legend = FALSE) +
+  scale_fill_manual(values=c("#117733", "#DDCC77")) +
+  labs(x = "Nectar production category", y = NULL, title = "Nectar production") +
+  ylim(0,1.1) +
+  theme_test()
+
+#Biodiversity relevance
+bb <- ggplot(bio.rev, aes(x = variable, y = value, fill = Field)) +
+  geom_boxplot(show.legend = FALSE) +
+  scale_fill_manual(values=c("#117733", "#DDCC77")) +
+  labs(x = "Category for number of species associations", y = NULL, title = "Biodiversity relevance") +
+  ylim(0,1.1) +
+  theme_test()
+
+
+plot_object <- ob / (sb | mb) / (nb | bb) + 
+  plot_annotation(tag_levels = list(c('A)','B)','C)','D)', 'E)'))) +   
+  theme_minimal() +
+  plot_layout(guides = 'collect',axis_titles = 'collect')
+
+
+ggsave("plot.png",plot_object,height=180,width=250,units="mm",dpi=300,type="cairo", device=png)
+
+```
+
+![This is the final figure I made.](plot.png)
+
+## 4. Reflection Section 
+
+-   New skills acquired:
+
+    -   How to select color-blind friendly and smart colors.
+
+    -   How to make quarto documents.
+
+    -   How to make a map in QGIS.
+
+    -   How to use different functions in tidyr and dplyr like pivot_longer() and wider(), using pipes, summarize(), group_by(), mutate(), arrange().
+
+    -   Understanding how ggplot() works and how to add items.
+
+    -   How to save data more reliably in .txt files since they are less prone to corruption.
+
+    -   How to operate github and connect to the repository through Rstudio.
+
+    -   How to organize my files into readme, raw data, temporary data (modified/processed), results and script when working with my data.
+
+    -   How to properly license a product.
+
+    -   How to make my data FAIR.
+
+    -   How to provide important information in my script.
+
+    -   How to make maps in R and use mapview().
+
+<!-- -->
+
+-   Challenges encountered and solutions: \*\*
+
+    -   Could not get the work directory to change in quarto script.
+
+    -   How to create a website with git, I used Amrei’s website as a reference to learn how.
+
+    -   Struggled using patchwork to put all the figures together, it made the graphs looks squished so I tried removing the legends and adjusting the width. I also rearranged the figure a few times to get the best layout. Still could not get the y-axis title to work.
+
+-   Areas for future improvement:
+
+    -   Spend more time editing the graphs.
+
+    -   Practice making FAIR data, improving scripts and readme files.
+
+    -   Become more organize with my files, separate them into readme, raw data, temporary data (modified/processed), results and script when working with my data.
